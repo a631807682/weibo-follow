@@ -11,7 +11,7 @@ from time import sleep
 import requests
 from lxml import etree
 from tqdm import tqdm
-
+import re
 
 class Follow(object):
     def __init__(self, config):
@@ -24,9 +24,84 @@ class Follow(object):
                 user_id_list = os.path.split(
                     os.path.realpath(__file__))[0] + os.sep + user_id_list
             user_id_list = self.get_user_list(user_id_list)
-        self.user_id_list = user_id_list  # 要爬取的微博用户的user_id列表
+        
+        # 加载已扩散用户列表
+        self.diffused_users = self._load_diffused_users()
+        
+        # 筛选未扩散的用户
+        self.user_id_list = [uid for uid in user_id_list if uid not in self.diffused_users]
+        print(f"[*] 已加载历史记录，已扩散 {len(self.diffused_users)} 个用户，本次将扩散 {len(self.user_id_list)} 个用户")
+        
         self.user_id = ''
         self.follow_list = []  # 存储爬取到的所有关注微博的uri和用户昵称
+        # 加载已存在的用户数据，用于去重
+        self._load_existing_users()
+
+    def _load_diffused_users(self):
+        """加载已扩散用户列表"""
+        diffused_file = 'diffused_users.txt'
+        diffused_users = set()
+        
+        if os.path.exists(diffused_file):
+            with open(diffused_file, 'rb') as f:
+                lines = f.read().splitlines()
+                for line in lines:
+                    try:
+                        user_id = line.decode('utf-8-sig').strip()
+                        if user_id.isdigit():
+                            diffused_users.add(user_id)
+                    except:
+                        continue
+                        
+        return diffused_users
+
+    def _save_diffused_users(self):
+        """保存已扩散用户列表"""
+        diffused_file = 'diffused_users.txt'
+        
+        with open(diffused_file, 'ab') as f:
+            for user_id in self.diffused_users:
+                if user_id not in self._load_diffused_users():
+                    f.write((user_id + '\n').encode(sys.stdout.encoding))
+
+    def _mark_as_diffused(self, user_id):
+        """标记用户为已扩散"""
+        self.diffused_users.add(user_id)
+        self._save_diffused_users()
+
+    def _load_existing_users(self):
+        """加载已存在的用户数据，用于去重"""
+        self.existing_users = set()
+        
+        # 从user_id_list.txt加载
+        if os.path.exists('user_id_list.txt'):
+            with open('user_id_list.txt', 'rb') as f:
+                lines = f.read().splitlines()
+                for line in lines:
+                    try:
+                        line_str = line.decode('utf-8-sig')
+                        info = line_str.split(' ')
+                        if len(info) > 0 and info[0].isdigit():
+                            user_id = info[0]
+                            self.existing_users.add(user_id)
+                    except:
+                        continue
+                        
+        # 从real_user_id_list.txt加载
+        if os.path.exists('real_user_id_list.txt'):
+            with open('real_user_id_list.txt', 'rb') as f:
+                lines = f.read().splitlines()
+                for line in lines:
+                    try:
+                        line_str = line.decode('utf-8-sig')
+                        info = line_str.split(' ')
+                        if len(info) > 0 and info[0].isdigit():
+                            user_id = info[0]
+                            self.existing_users.add(user_id)
+                    except:
+                        continue
+                        
+        print(f"[*] 已加载历史记录，去重库现有 {len(self.existing_users)} 个用户")
 
     def validate_config(self, config):
         """验证配置是否正确"""
@@ -89,9 +164,56 @@ class Follow(object):
                 im = t.xpath('.//a/@href')[-1]
                 uri = im.split('uid=')[-1].split('&')[0].split('/')[-1]
                 nickname = t.xpath('.//a/text()')[0]
-                if {'uri': uri, 'nickname': nickname} not in self.follow_list:
-                    self.follow_list.append({'uri': uri, 'nickname': nickname})
-                    print(u'%s %s' % (nickname, uri))
+                # 从当前页面直接获取用户粉丝数
+                # 获取整个表格的文本内容，用于解析粉丝数
+                table_text = t.xpath('string(.)')
+                follower_count = self.get_user_followers(table_text)
+                
+                # 用户筛选条件
+                if self.is_valid_user(nickname, follower_count):
+                    # 检查是否已存在于去重库中
+                    if uri not in self.existing_users:
+                        self.follow_list.append({'uri': uri, 'nickname': nickname, 'followers': follower_count})
+                        self.existing_users.add(uri)
+                        print(u'%s %s (粉丝数: %d)' % (nickname, uri, follower_count))
+
+    def get_user_followers(self, user_info_text):
+        """从关注列表页面直接解析粉丝数"""
+        try:
+            # 根据实际页面结构，粉丝数格式为：粉丝943.9万人 或 粉丝1208.9万人
+            if "粉丝" in user_info_text:
+                # 提取粉丝数字部分
+                followers_match = re.search(r'粉丝([\d.]+)(万?)人', user_info_text)
+                if followers_match:
+                    followers_num = float(followers_match.group(1))
+                    unit = followers_match.group(2)
+                    
+                    if unit == "万":
+                        return int(followers_num * 10000)
+                    else:
+                        return int(followers_num)
+                        
+            return 0
+        except Exception as e:
+            print(f"解析粉丝数时出错: {e}")
+            return 0
+
+    def is_valid_user(self, nickname, follower_count):
+        """验证用户是否符合条件"""
+        # 用户筛选条件
+        # 排除使用默认昵称的用户
+        default_nickname_patterns = ["微博用户", "默认", "新浪用户"]
+        
+        # 检查昵称条件
+        for pattern in default_nickname_patterns:
+            if pattern in nickname:
+                return False
+                
+        # 只接受粉丝数 < 10000 的用户
+        if follower_count < 10000:
+            return True
+            
+        return False
 
     def get_follow_list(self):
         """获取关注用户主页地址"""
@@ -110,10 +232,23 @@ class Follow(object):
         print(u'用户关注列表爬取完毕')
 
     def write_to_txt(self):
+        """将用户数据写入相应的txt文件"""
+        # 写入user_id_list.txt（粉丝数 < 10000）
         with open('user_id_list.txt', 'ab') as f:
             for user in self.follow_list:
                 f.write((user['uri'] + ' ' + user['nickname'] + '\n').encode(
                     sys.stdout.encoding))
+        
+        # 写入real_user_id_list.txt（粉丝数 1-1000）
+        real_users = [user for user in self.follow_list if 1 <= user['followers'] <= 1000]
+        if real_users:
+            with open('real_user_id_list.txt', 'ab') as f:
+                for user in real_users:
+                    f.write((user['uri'] + ' ' + user['nickname'] + '\n').encode(
+                        sys.stdout.encoding))
+            print(f"[*] 已保存 {len(real_users)} 条真实用户数据到 real_user_id_list.txt")
+        
+        print(f"[*] 已保存 {len(self.follow_list)} 条用户数据到 user_id_list.txt")
 
     def get_user_list(self, file_name):
         """获取文件中的微博id信息"""
@@ -143,9 +278,11 @@ class Follow(object):
             for user_id in self.user_id_list:
                 self.initialize_info(user_id)
                 print('*' * 100)
+                print(f"[*] 正在扩散用户: {user_id}")
                 self.get_follow_list()  # 爬取微博信息
                 self.write_to_txt()
-                print(u'信息抓取完毕')
+                self._mark_as_diffused(user_id)
+                print(u'用户扩散完毕')
                 print('*' * 100)
         except Exception as e:
             print('Error: ', e)
@@ -175,3 +312,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
