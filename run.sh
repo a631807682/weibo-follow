@@ -33,8 +33,19 @@ case $1 in
         fi
         ;;
     download)
-        echo "正在执行头像下载器..."
-        $PYTHON_BIN $AVATAR_SCRIPT
+        # 检查是否已在运行（防止重复启动）
+        pid=$(ps -ef | grep $AVATAR_SCRIPT | grep -v grep | awk '{print $2}')
+        if [ -n "$pid" ]; then
+            echo "错误: 头像下载器已在运行中 (PID: $pid)"
+        else
+            echo "正在后台启动头像下载器..."
+            # 使用 nohup 后台执行，并将日志输出到 avatar.log
+            nohup $PYTHON_BIN -u $AVATAR_SCRIPT > avatar.log 2>&1 &
+            sleep 1
+            pid=$(ps -ef | grep $AVATAR_SCRIPT | grep -v grep | awk '{print $2}')
+            echo "启动成功! PID: $pid"
+            echo "查看下载进度请运行: tail -f avatar.log"
+        fi
         ;;
     status)
         pid=$(ps -ef | grep $PYTHON_SCRIPT | grep -v grep | awk '{print $2}')
