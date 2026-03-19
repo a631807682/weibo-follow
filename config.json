@@ -3,5 +3,11 @@
   "avatar_sync_file": "real_user_id_list.txt",
   "output_dir": "avatars",
   "csv_file": "weibo_users.csv",
+  "scrape_config": {
+    "min_pause": 2,
+    "max_pause": 4,
+    "min_pages": 1,
+    "max_pages": 3
+  },
   "cookie": ""
 }

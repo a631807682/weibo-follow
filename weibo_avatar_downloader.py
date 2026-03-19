@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 微博用户头像下载器
-功能：从微博.cn个人主页下载用户头像，并记录头像昵称关系到CSV文件
-支持断点续传和用户ID+用户名格式的输入文件
+功能：从微博个人主页下载用户头像，并记录头像昵称关系到CSV文件
+支持配置随机停留时间和性别解析功能
 """
 
 import requests
@@ -65,6 +65,14 @@ def get_last_processed_user(csv_file):
         print(f"警告：读取CSV文件时发生异常 - {e}")
         return None
 
+def parse_gender(text):
+    """从文本中解析性别信息"""
+    if '男' in text:
+        return '男'
+    if '女' in text:
+        return '女'
+    return ''
+
 def get_user_info_web(user_id, config):
     """通过微博.cn网页解析获取用户信息（优先方法）"""
     url = f"https://weibo.cn/{user_id}/profile"
@@ -84,13 +92,12 @@ def get_user_info_web(user_id, config):
         # 检查是否是访问控制/验证页面
         if "Sina Visitor System" in response.text or "验证页面" in response.text or "安全验证" in response.text:
             print(f"警告：用户 {user_id} 页面返回访问控制页面")
-            return None, None
+            return None, None, ""
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # 查找头像URL（根据提供的HTML结构）
         avatar_url = None
-        # 查找包含头像链接的 td 标签
         td_tags = soup.find_all('td', valign='top')
         for td in td_tags:
             a_tag = td.find('a', href=re.compile(r'\/avatar\?'))
@@ -101,7 +108,6 @@ def get_user_info_web(user_id, config):
                     break
         
         if not avatar_url:
-            # 备用方法：查找所有包含头像特征的 img 标签
             for img in soup.find_all('img'):
                 if img and 'src' in img.attrs:
                     src = img['src']
@@ -111,19 +117,16 @@ def get_user_info_web(user_id, config):
         
         # 查找昵称（根据提供的HTML结构）
         nickname = None
-        # 查找包含昵称的 span.ctt 标签
         ctt_tags = soup.find_all('span', class_='ctt')
         for span in ctt_tags:
             text = span.get_text(strip=True)
             if text:
-                # 从文本中提取昵称（在性别/地区之前）
                 match = re.match(r'^([^\s]+)', text)
                 if match:
                     nickname = match.group(1)
                     break
         
         if not nickname:
-            # 备用方法：查找包含名字特征的标签
             for tag in ['h1', 'h2', 'h3', 'div', 'span']:
                 elements = soup.find_all(tag)
                 for el in elements:
@@ -134,14 +137,23 @@ def get_user_info_web(user_id, config):
                 if nickname:
                     break
         
+        # 查找性别信息
+        gender = ""
+        for span in ctt_tags:
+            text = span.get_text(strip=True)
+            parsed_gender = parse_gender(text)
+            if parsed_gender:
+                gender = parsed_gender
+                break
+        
         if not avatar_url or not nickname:
             print(f"警告：用户 {user_id} 信息不完整，头像URL: {avatar_url}, 昵称: {nickname}")
         
-        return avatar_url, nickname
+        return avatar_url, nickname, gender
     
     except Exception as e:
         print(f"错误：网页解析时发生异常 - {e}")
-        return None, None
+        return None, None, ""
 
 def get_user_info_api(user_id, config):
     """通过微博API获取用户信息（备用方法）"""
@@ -173,9 +185,18 @@ def get_user_info_api(user_id, config):
                 # 获取昵称
                 nickname = user.get('screen_name')
                 
+                # 获取性别
+                gender = user.get('gender', '')
+                if gender == 'm':
+                    gender = '男'
+                elif gender == 'f':
+                    gender = '女'
+                else:
+                    gender = ''
+                
                 if avatar_url and nickname:
                     print(f"成功通过API获取用户 {user_id} 信息")
-                    return avatar_url, nickname
+                    return avatar_url, nickname, gender
                 else:
                     print(f"警告：API返回的用户 {user_id} 信息不完整")
             else:
@@ -186,7 +207,7 @@ def get_user_info_api(user_id, config):
     except Exception as e:
         print(f"错误：API请求时发生异常 - {e}")
     
-    return None, None
+    return None, None, ""
 
 def download_avatar(user_id, avatar_url, output_dir):
     """下载用户头像"""
@@ -194,23 +215,24 @@ def download_avatar(user_id, avatar_url, output_dir):
         return None
     
     try:
-        # 确保输出目录存在
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
         
-        # 确定文件扩展名
+        extension = 'jpg'
         if avatar_url.endswith('.jpg') or avatar_url.endswith('.jpeg'):
             extension = 'jpg'
         elif avatar_url.endswith('.png'):
             extension = 'png'
         elif avatar_url.endswith('.gif'):
             extension = 'gif'
-        else:
-            extension = 'jpg'
         
-        # 下载头像
         filename = f"{user_id}.{extension}"
         file_path = os.path.join(output_dir, filename)
+
+        # 检查文件是否已存在
+        if os.path.exists(file_path):
+            print(f"用户 {user_id} 的头像已存在，跳过下载")
+            return file_path
         
         response = requests.get(avatar_url, timeout=10)
         if response.status_code == 200:
@@ -231,7 +253,7 @@ def save_to_csv(data_list, csv_file, append=False):
     try:
         mode = 'a' if append and os.path.exists(csv_file) else 'w'
         with open(csv_file, mode, encoding='utf-8-sig', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=['user_id', 'username', 'nickname', 'avatar_file'])
+            writer = csv.DictWriter(f, fieldnames=['user_id', 'username', 'nickname', 'avatar_file', 'gender'])
             
             if mode == 'w' or (mode == 'a' and os.path.getsize(csv_file) == 0):
                 writer.writeheader()
@@ -242,30 +264,40 @@ def save_to_csv(data_list, csv_file, append=False):
     except Exception as e:
         print(f"错误：保存CSV文件时发生异常 - {e}")
 
+def random_pause(config, page_num):
+    """根据配置随机暂停"""
+    scrape_config = config.get('scrape_config', {})
+    min_pause = scrape_config.get('min_pause', 2)
+    max_pause = scrape_config.get('max_pause', 4)
+    min_pages = scrape_config.get('min_pages', 1)
+    max_pages = scrape_config.get('max_pages', 3)
+    
+    # 计算是否需要暂停（每 n 到 m 页暂停一次）
+    if page_num > 0 and (page_num % random.randint(min_pages, max_pages)) == 0:
+        delay = random.uniform(min_pause, max_pause)
+        print(f"随机暂停 {delay:.2f} 秒")
+        time.sleep(delay)
+
 def main():
     """主函数"""
     print("=" * 50)
     print("微博用户头像下载器")
     print("=" * 50)
     
-    # 加载配置
     config = load_config()
     if not config:
         return
     
-    # 检查Cookie配置
     if not config.get('cookie'):
         print("警告：未配置Cookie，程序可能无法正常工作")
         print("建议配置Cookie以提高成功率")
         print()
     
-    # 读取用户信息列表
     user_info_list = read_user_info(config['avatar_sync_file'])
     if not user_info_list:
         print("没有找到用户信息，程序结束")
         return
     
-    # 获取上次处理的位置
     last_processed_user = get_last_processed_user(config['csv_file'])
     start_index = 0
     
@@ -278,19 +310,18 @@ def main():
         else:
             print(f"警告：未在用户信息列表中找到上次处理的用户ID {last_processed_user}，将从头开始")
     
-    # 处理每个用户
     results = []
     for i in range(start_index, len(user_info_list)):
         user_id, username = user_info_list[i]
         print(f"\n处理用户 {i+1}/{len(user_info_list)}: {user_id} ({username})")
         
         # 优先通过网页解析获取用户信息
-        avatar_url, nickname = get_user_info_web(user_id, config)
+        avatar_url, nickname, gender = get_user_info_web(user_id, config)
         
         # 如果网页解析失败，尝试通过API获取
         if not avatar_url or not nickname:
             print("网页解析失败，尝试通过API获取")
-            avatar_url, nickname = get_user_info_api(user_id, config)
+            avatar_url, nickname, gender = get_user_info_api(user_id, config)
         
         # 下载头像
         avatar_file = None
@@ -303,19 +334,17 @@ def main():
                 'user_id': user_id,
                 'username': username,
                 'nickname': nickname,
-                'avatar_file': os.path.basename(avatar_file) if avatar_file else ''
+                'avatar_file': os.path.basename(avatar_file) if avatar_file else '',
+                'gender': gender
             })
             
-            # 保存到CSV（每次处理完一个用户就保存，避免数据丢失）
             save_to_csv(results, config['csv_file'], append=True)
             results.clear()
         else:
             print(f"用户 {user_id} 信息不完整（头像或昵称缺失），不保存到CSV")
         
-        # 使用随机延迟避免被封禁
-        delay = random.uniform(2.0, 4.0)
-        print(f"等待 {delay:.2f} 秒")
-        time.sleep(delay)
+        # 随机暂停
+        random_pause(config, i + 1)
     
     print("\n" + "=" * 50)
     print("程序执行完成！")
