@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 微博用户头像下载器
-功能：从微博API获取用户信息并下载头像，记录头像昵称关系到CSV文件
+功能：从微博.cn个人主页下载用户头像，并记录头像昵称关系到CSV文件
 支持断点续传和用户ID+用户名格式的输入文件
 """
 
@@ -65,15 +65,93 @@ def get_last_processed_user(csv_file):
         print(f"警告：读取CSV文件时发生异常 - {e}")
         return None
 
-def get_user_info_api(user_id, config):
-    """通过微博API获取用户信息（头像URL和昵称）"""
-    # 尝试使用微博API获取用户信息
-    api_url = f"https://m.weibo.cn/api/container/getIndex?type=uid&value={user_id}"
+def get_user_info_web(user_id, config):
+    """通过微博.cn网页解析获取用户信息（优先方法）"""
+    url = f"https://weibo.cn/{user_id}/profile"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Referer": "https://m.weibo.cn/",
+        "Referer": "https://weibo.cn/",
+    }
+    
+    if config.get('cookie'):
+        headers["Cookie"] = config['cookie']
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.encoding = 'utf-8'
+        
+        # 检查是否是访问控制/验证页面
+        if "Sina Visitor System" in response.text or "验证页面" in response.text or "安全验证" in response.text:
+            print(f"警告：用户 {user_id} 页面返回访问控制页面")
+            return None, None
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 查找头像URL（根据提供的HTML结构）
+        avatar_url = None
+        # 查找包含头像链接的 td 标签
+        td_tags = soup.find_all('td', valign='top')
+        for td in td_tags:
+            a_tag = td.find('a', href=re.compile(r'\/avatar\?'))
+            if a_tag:
+                img_tag = a_tag.find('img')
+                if img_tag and 'src' in img_tag.attrs:
+                    avatar_url = img_tag['src']
+                    break
+        
+        if not avatar_url:
+            # 备用方法：查找所有包含头像特征的 img 标签
+            for img in soup.find_all('img'):
+                if img and 'src' in img.attrs:
+                    src = img['src']
+                    if 'sinaimg.cn' in src or 'avatar' in src.lower():
+                        avatar_url = src
+                        break
+        
+        # 查找昵称（根据提供的HTML结构）
+        nickname = None
+        # 查找包含昵称的 span.ctt 标签
+        ctt_tags = soup.find_all('span', class_='ctt')
+        for span in ctt_tags:
+            text = span.get_text(strip=True)
+            if text:
+                # 从文本中提取昵称（在性别/地区之前）
+                match = re.match(r'^([^\s]+)', text)
+                if match:
+                    nickname = match.group(1)
+                    break
+        
+        if not nickname:
+            # 备用方法：查找包含名字特征的标签
+            for tag in ['h1', 'h2', 'h3', 'div', 'span']:
+                elements = soup.find_all(tag)
+                for el in elements:
+                    text = el.get_text(strip=True)
+                    if text and len(text) < 20 and not text.isdigit() and '微博' not in text and '加关注' not in text:
+                        nickname = text
+                        break
+                if nickname:
+                    break
+        
+        if not avatar_url or not nickname:
+            print(f"警告：用户 {user_id} 信息不完整，头像URL: {avatar_url}, 昵称: {nickname}")
+        
+        return avatar_url, nickname
+    
+    except Exception as e:
+        print(f"错误：网页解析时发生异常 - {e}")
+        return None, None
+
+def get_user_info_api(user_id, config):
+    """通过微博API获取用户信息（备用方法）"""
+    api_url = f"https://weibo.com/ajax/profile/info?uid={user_id}"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Referer": f"https://weibo.com/u/{user_id}",
         "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
     }
     
     if config.get('cookie'):
@@ -87,8 +165,7 @@ def get_user_info_api(user_id, config):
             data = response.json()
             
             if data.get('ok') == 1 and data.get('data'):
-                user_info = data.get('data', {})
-                user = user_info.get('userInfo', {})
+                user = data.get('data', {})
                 
                 # 获取头像URL
                 avatar_url = user.get('avatar_hd') or user.get('profile_image_url')
@@ -176,6 +253,12 @@ def main():
     if not config:
         return
     
+    # 检查Cookie配置
+    if not config.get('cookie'):
+        print("警告：未配置Cookie，程序可能无法正常工作")
+        print("建议配置Cookie以提高成功率")
+        print()
+    
     # 读取用户信息列表
     user_info_list = read_user_info(config['avatar_sync_file'])
     if not user_info_list:
@@ -201,13 +284,13 @@ def main():
         user_id, username = user_info_list[i]
         print(f"\n处理用户 {i+1}/{len(user_info_list)}: {user_id} ({username})")
         
-        # 尝试通过API获取用户信息
-        avatar_url, nickname = get_user_info_api(user_id, config)
+        # 优先通过网页解析获取用户信息
+        avatar_url, nickname = get_user_info_web(user_id, config)
         
-        # 如果API失败，尝试通过网页解析
+        # 如果网页解析失败，尝试通过API获取
         if not avatar_url or not nickname:
-            print("API获取失败，尝试通过网页解析")
-            avatar_url, nickname = get_user_info_web(user_id, config)
+            print("网页解析失败，尝试通过API获取")
+            avatar_url, nickname = get_user_info_api(user_id, config)
         
         # 下载头像
         avatar_file = None
@@ -215,7 +298,7 @@ def main():
             avatar_file = download_avatar(user_id, avatar_url, config['output_dir'])
         
         # 只有在成功获取到头像和昵称时才保存到CSV
-        if avatar_file:
+        if avatar_file and nickname:
             results.append({
                 'user_id': user_id,
                 'username': username,
@@ -230,7 +313,7 @@ def main():
             print(f"用户 {user_id} 信息不完整（头像或昵称缺失），不保存到CSV")
         
         # 使用随机延迟避免被封禁
-        delay = random.uniform(1.5, 3.5)
+        delay = random.uniform(2.0, 4.0)
         print(f"等待 {delay:.2f} 秒")
         time.sleep(delay)
     
@@ -239,71 +322,6 @@ def main():
     print("=" * 50)
     print(f"头像下载到目录: {config['output_dir']}")
     print(f"用户信息保存到: {config['csv_file']}")
-
-def get_user_info_web(user_id, config):
-    """通过网页解析获取用户信息（备用方法）"""
-    url = f"https://m.weibo.cn/profile/{user_id}"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Referer": "https://m.weibo.cn/",
-    }
-    
-    if config.get('cookie'):
-        headers["Cookie"] = config['cookie']
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8'
-        
-        if "Sina Visitor System" in response.text:
-            print(f"警告：用户 {user_id} 页面返回访问控制页面")
-            return None, None
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 查找头像URL
-        avatar_url = None
-        m_img_box = soup.find('div', class_='m-img-box')
-        if m_img_box:
-            img_tag = m_img_box.find('img')
-            if img_tag and 'src' in img_tag.attrs:
-                avatar_url = img_tag['src']
-        
-        if not avatar_url:
-            avatar_tag = soup.find('img', class_='avatar')
-            if avatar_tag and 'src' in avatar_tag.attrs:
-                avatar_url = avatar_tag['src']
-        
-        if not avatar_url:
-            for img in soup.find_all('img'):
-                if img and 'src' in img.attrs:
-                    src = img['src']
-                    if 'sinaimg.cn' in src or 'avatar' in src.lower():
-                        avatar_url = src
-                        break
-        
-        # 查找昵称
-        nickname = None
-        h3_tag = soup.find('h3', class_='m-box')
-        if h3_tag:
-            span_tag = h3_tag.find('span', class_='m-text-cut')
-            if span_tag:
-                nickname = span_tag.get_text(strip=True)
-        
-        if not nickname:
-            nickname_tag = soup.find('h1', class_='name')
-            if nickname_tag:
-                nickname = nickname_tag.get_text(strip=True)
-        
-        if not avatar_url or not nickname:
-            print(f"警告：用户 {user_id} 信息不完整，头像URL: {avatar_url}, 昵称: {nickname}")
-        
-        return avatar_url, nickname
-    
-    except Exception as e:
-        print(f"错误：网页解析时发生异常 - {e}")
-        return None, None
 
 if __name__ == "__main__":
     main()
