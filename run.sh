@@ -23,13 +23,26 @@ case $1 in
         fi
         ;;
     stop)
-        pid=$(ps -ef | grep $PYTHON_SCRIPT | grep -v grep | awk '{print $2}')
-        if [ -z "$pid" ]; then
-            echo "爬虫未在运行。"
-        else
-            echo "正在停止 PID 为 $pid 的进程..."
-            kill -9 $pid
-            echo "已停止。"
+        # 获取爬虫和下载器的 PID
+        pid_crawler=$(ps -ef | grep $PYTHON_SCRIPT | grep -v grep | awk '{print $2}')
+        pid_avatar=$(ps -ef | grep $AVATAR_SCRIPT | grep -v grep | awk '{print $2}')
+
+        if [ -z "$pid_crawler" ] && [ -z "$pid_avatar" ]; then
+            echo "错误: 没有正在运行的任务。"
+        fi
+
+        # 停止主爬虫
+        if [ -n "$pid_crawler" ]; then
+            echo "正在停止主爬虫 (PID: $pid_crawler)..."
+            kill $pid_crawler
+            echo "主爬虫已发送停止信号。"
+        fi
+
+        # 停止下载器
+        if [ -n "$pid_avatar" ]; then
+            echo "正在停止头像下载器 (PID: $pid_avatar)..."
+            kill $pid_avatar
+            echo "头像下载器已发送停止信号。"
         fi
         ;;
     download)
