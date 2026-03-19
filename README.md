@@ -5,7 +5,8 @@
 
 1. 只抓取 1-1000 粉丝用户存储于 real_user_id_list.txt
 2. 只抓取 10000 粉丝用户用于扩散，存储于 user_id_list.txt
-3. 执行 ./run.sh start
+3. 执行 ./run.sh start 用于扩散真实用户
+4. 执行 ./run.sh download 用于下载头像
 
 ## 使用方法
 

@@ -1,4 +1,7 @@
 {
-    "user_id_list": "user_id_list.txt",
-    "cookie": "SCF=Alkvw6uFWQ-A8oDsREfsrS9uz5MApPqmkKqOcXtRA1s7u1-gTRMJiyfdF4sO0E2xdIG6xe82yL5fU5A3AjV2R0Y.; SUB=_2A25EvjCHDeRhGeFK41EW-CbKwjyIHXVnssxPrDV6PUJbktAbLXHVkW1NQvGubi-pce3IHFS_dkr5t6wHTsCy0o_X; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9WFmGDBMH0Us7sPaI8QqmHhU5NHD95QNShn0S0nRSo.7Ws4DqcjMi--NiK.Xi-2Ri--ciKnRi-zNS0BRe0MR1hq4e5tt; SSOLoginState=1773813975; ALF=1776405975; WEIBOCN_FROM=1110006030; MLOGIN=1; _T_WM=20117598881; XSRF-TOKEN=7a45e5; mweibo_short_token=1f5c3e804e; M_WEIBOCN_PARAMS=luicode%3D20000174%26uicode%3D20000174"
+  "user_id_list": "user_id_list.txt",
+  "avatar_sync_file": "real_user_id_list.txt",
+  "output_dir": "avatars",
+  "csv_file": "weibo_users.csv",
+  "cookie": "SCF=Alkvw6uFWQ-A8oDsREfsrS9uz5MApPqmkKqOcXtRA1s7u1-gTRMJiyfdF4sO0E2xdIG6xe82yL5fU5A3AjV2R0Y.; SUB=_2A25EvjCHDeRhGeFK41EW-CbKwjyIHXVnssxPrDV6PUJbktAbLXHVkW1NQvGubi-pce3IHFS_dkr5t6wHTsCy0o_X; SUBP=0033WrSXqPxfM725Ws9jqgMF55529P9D9WFmGDBMH0Us7sPaI8QqmHhU5NHD95QNShn0S0nRSo.7Ws4DqcjMi--NiK.Xi-2Ri--ciKnRi-zNS0BRe0MR1hq4e5tt; SSOLoginState=1773813975; ALF=1776405975; WEIBOCN_FROM=1110006030; MLOGIN=1; _T_WM=20117598881; XSRF-TOKEN=7a45e5; mweibo_short_token=1f5c3e804e; M_WEIBOCN_PARAMS=luicode%3D20000174%26uicode%3D20000174"
 }

@@ -2,8 +2,9 @@
 
 # 脚本配置
 PYTHON_SCRIPT="weibo_follow.py"
+AVATAR_SCRIPT="weibo_avatar_downloader.py"
 LOG_FILE="output.log"
-DATA_FILE="weibo_follow_data.csv"
+USER_LIST="real_user_id_list.txt"
 PYTHON_BIN="python3" # 如果是在虚拟环境，请指向 venv/bin/python3
 
 case $1 in
@@ -31,6 +32,10 @@ case $1 in
             echo "已停止。"
         fi
         ;;
+    download)
+        echo "正在执行头像下载器..."
+        $PYTHON_BIN $AVATAR_SCRIPT
+        ;;
     status)
         pid=$(ps -ef | grep $PYTHON_SCRIPT | grep -v grep | awk '{print $2}')
         if [ -n "$pid" ]; then
@@ -39,12 +44,12 @@ case $1 in
         else
             echo "状态: [未运行]"
         fi
-        # 统计数据量
-        if [ -f "$DATA_FILE" ]; then
-            count=$(wc -l < "$DATA_FILE")
-            echo "已抓取用户数: $((count-1))"
+        # 统计用户数量
+        if [ -f "$USER_LIST" ]; then
+            count=$(wc -l < "$USER_LIST")
+            echo "待处理用户数: $count"
         else
-            echo "尚未创建数据文件。"
+            echo "尚未找到用户列表文件。"
         fi
         ;;
     log)
@@ -52,7 +57,7 @@ case $1 in
         tail -f $LOG_FILE
         ;;
     *)
-        echo "用法: sh run.sh {start|stop|status|log}"
+        echo "用法: sh run.sh {start|stop|download|status|log}"
         exit 1
         ;;
 esac
